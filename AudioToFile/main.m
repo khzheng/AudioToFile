@@ -13,6 +13,11 @@
 
 #pragma mark - User-data struct
 
+typedef struct MySineWavePlayer {
+    AudioUnit outputUnit;
+    double startingFrameCount;
+} MySineWavePlayer;
+
 #pragma mark - Callbacks
 
 #pragma mark - Utility
@@ -46,6 +51,8 @@ int main(int argc, const char * argv[])
 {
 
     @autoreleasepool {
+        
+        MySineWavePlayer player = {0};
         
         // setup output unit and callback
         // start playing
