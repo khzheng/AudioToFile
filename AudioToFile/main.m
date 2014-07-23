@@ -9,6 +9,7 @@
 #import <Foundation/Foundation.h>
 #import <AudioToolbox/AudioToolbox.h>
 
+#define SAVE
 #define sineFrequency 880.0
 
 #pragma mark - User-data struct
@@ -16,6 +17,7 @@
 typedef struct MySineWavePlayer {
     AudioUnit outputUnit;
     double startingFrameCount;
+    AudioStreamBasicDescription outputFormat;
 } MySineWavePlayer;
 
 #pragma mark - Callbacks
@@ -82,7 +84,11 @@ void CreateAndConnectOutputUnit (MySineWavePlayer *player) {
     // define desc that matches output
     AudioComponentDescription outputcd = {0};
     outputcd.componentType = kAudioUnitType_Output;
+#ifdef SAVE
+    outputcd.componentSubType = kAudioUnitSubType_GenericOutput;
+#else
     outputcd.componentSubType = kAudioUnitSubType_DefaultOutput;
+#endif
     outputcd.componentManufacturer = kAudioUnitManufacturer_Apple;
     
     // find the compnent that matches the output desc
@@ -95,7 +101,11 @@ void CreateAndConnectOutputUnit (MySineWavePlayer *player) {
     // create the output unit
     CheckError(AudioComponentInstanceNew(comp, &player->outputUnit), "Couldn't create output unit");
     
-    // set the redner callback for output
+    // get output stream format
+    UInt32 propertySize = sizeof(AudioStreamBasicDescription);
+    CheckError(AudioUnitGetProperty(player->outputUnit, kAudioUnitProperty_StreamFormat, kAudioUnitScope_Input, 0, &player->outputFormat, &propertySize), "Couldn't get output stream format");
+    
+    // set the render callback for output
     AURenderCallbackStruct callbackStruct;
     callbackStruct.inputProc = SineWaveRenderProc;
     callbackStruct.inputProcRefCon = player;
@@ -105,10 +115,14 @@ void CreateAndConnectOutputUnit (MySineWavePlayer *player) {
     CheckError(AudioUnitInitialize(player->outputUnit), "Couldn't initialize output unit");
 }
 
+#define IN_NUMBER_FRAMES 64
+
 int main(int argc, const char * argv[])
 {
 
     @autoreleasepool {
+        
+        NSMutableData *audioData = [[NSMutableData alloc] init];
         
         MySineWavePlayer player = {0};
         
@@ -118,8 +132,49 @@ int main(int argc, const char * argv[])
         // start playing
         CheckError(AudioOutputUnitStart(player.outputUnit), "Couldn't start output unit");
         
+#ifdef SAVE
+        int count = 0;
+        
+        while (count < 1000) {
+//            if (count % 64 == 0) {
+                AudioUnitRenderActionFlags flags = kAudioOfflineUnitRenderAction_Render;
+                AudioTimeStamp inTimeStamp;
+                memset(&inTimeStamp, 0, sizeof(inTimeStamp));
+                inTimeStamp.mFlags = kAudioTimeStampSampleTimeValid;
+                UInt32 busNumber = 0;
+                UInt32 inNumberFrames = IN_NUMBER_FRAMES;
+                
+                UInt32 numberBuffers = player.outputFormat.mChannelsPerFrame;
+                UInt32 bufferListSize = offsetof(AudioBufferList, mBuffers) + (numberBuffers * sizeof(AudioBuffer));
+                AudioBufferList *bufferList = malloc(bufferListSize);
+                //            UInt32 numberBytes = inNumberFrames * player.outputFormat.mBytesPerFrame;
+                bufferList->mNumberBuffers = numberBuffers;
+                for (int i = 0; i < numberBuffers; i++) {
+                    bufferList->mBuffers[i].mNumberChannels = player.outputFormat.mChannelsPerFrame;
+                    bufferList->mBuffers[i].mDataByteSize = inNumberFrames*sizeof(AudioUnitSampleType);
+                    bufferList->mBuffers[i].mData = calloc(inNumberFrames, sizeof(AudioUnitSampleType));//malloc(numberBytes);
+                }
+                
+                CheckError(AudioUnitRender(player.outputUnit, &flags, &inTimeStamp, busNumber, inNumberFrames, bufferList), "Couldn't render audio data");
+                
+                [audioData appendBytes:bufferList->mBuffers[0].mData length:inNumberFrames];
+                
+                inTimeStamp.mSampleTime += inNumberFrames;
+//            }
+            count++;
+        }
+#endif
         // play for 5 seconds
-        sleep(5);
+//        sleep(5);
+        
+//        printf("done sleep");
+        
+        NSArray *paths = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES);
+        NSString *documentsDirectory = [paths firstObject];
+        NSString *destinationFilePath = [NSString stringWithFormat:@"%@/output", documentsDirectory];
+        [audioData writeToFile:destinationFilePath atomically:NO];
+        
+        [audioData release];
         
     cleanup:
         AudioOutputUnitStop(player.outputUnit);
