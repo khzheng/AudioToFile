@@ -7,14 +7,24 @@
 //
 
 #import <Foundation/Foundation.h>
+#import <AudioToolbox/AudioToolbox.h>
+
+#define sineFrequency 880.0
+
+#pragma mark - User-data struct
+
+#pragma mark - Callbacks
+
+#pragma mark - Utility
 
 int main(int argc, const char * argv[])
 {
 
     @autoreleasepool {
         
-        // insert code here...
-        NSLog(@"Hello, World!");
+        // setup output unit and callback
+        // start playing
+        // clean up
         
     }
     return 0;
