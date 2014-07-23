@@ -20,6 +20,37 @@ typedef struct MySineWavePlayer {
 
 #pragma mark - Callbacks
 
+OSStatus SineWaveRenderProc(void *inRefCon,
+                            AudioUnitRenderActionFlags *ioActionFlags,
+                            const AudioTimeStamp *inTimeStamp,
+                            UInt32 inBusNumber,
+                            UInt32 inNumberFrames,
+                            AudioBufferList *ioData) {
+//    printf("needs %d frames at %f\n", inNumberFrames, CFAbsoluteTimeGetCurrent());
+    
+    MySineWavePlayer *player = (MySineWavePlayer *)inRefCon;
+    
+    double j = player->startingFrameCount;
+    double cycleLength = 44100. / sineFrequency;
+    int frame = 0;
+    for (frame = 0; frame < inNumberFrames; frame++) {
+        Float32 *data = (Float32 *)ioData->mBuffers[0].mData;
+        data[frame] = (Float32)sin(2 * M_PI * (j / cycleLength));
+        
+        // copy to right channel too
+        data = (Float32 *)ioData->mBuffers[1].mData;
+        data[frame] = (Float32)sin(2 * M_PI * (j / cycleLength));
+        
+        j += 1.0;
+        if (j > cycleLength)
+            j -= cycleLength;
+    }
+    
+    player->startingFrameCount = j;
+    
+    return noErr;
+}
+
 #pragma mark - Utility
 
 static char *StringFromOSStatusError(OSStatus error, char *str) {
@@ -47,6 +78,33 @@ void CheckError(OSStatus error, const char *operation) {
     [NSException raise:@"NSInternalInconsistencyException" format:@"AudioServicesError: %s (%i: %s)\n backtrace:\n %@", operation, (int)error, errorStr, [NSThread callStackSymbols]];
 }
 
+void CreateAndConnectOutputUnit (MySineWavePlayer *player) {
+    // define desc that matches output
+    AudioComponentDescription outputcd = {0};
+    outputcd.componentType = kAudioUnitType_Output;
+    outputcd.componentSubType = kAudioUnitSubType_DefaultOutput;
+    outputcd.componentManufacturer = kAudioUnitManufacturer_Apple;
+    
+    // find the compnent that matches the output desc
+    AudioComponent comp = AudioComponentFindNext(NULL, &outputcd);
+    if (comp == NULL) {
+        printf("coun't get output component");
+        exit(-1);
+    }
+    
+    // create the output unit
+    CheckError(AudioComponentInstanceNew(comp, &player->outputUnit), "Couldn't create output unit");
+    
+    // set the redner callback for output
+    AURenderCallbackStruct callbackStruct;
+    callbackStruct.inputProc = SineWaveRenderProc;
+    callbackStruct.inputProcRefCon = player;
+    CheckError(AudioUnitSetProperty(player->outputUnit, kAudioUnitProperty_SetRenderCallback, kAudioUnitScope_Input, 0, &callbackStruct, sizeof(callbackStruct)), "Couldn't set render callback for output");
+    
+    // initialize output unit
+    CheckError(AudioUnitInitialize(player->outputUnit), "Couldn't initialize output unit");
+}
+
 int main(int argc, const char * argv[])
 {
 
@@ -55,8 +113,18 @@ int main(int argc, const char * argv[])
         MySineWavePlayer player = {0};
         
         // setup output unit and callback
+        CreateAndConnectOutputUnit(&player);
+        
         // start playing
-        // clean up
+        CheckError(AudioOutputUnitStart(player.outputUnit), "Couldn't start output unit");
+        
+        // play for 5 seconds
+        sleep(5);
+        
+    cleanup:
+        AudioOutputUnitStop(player.outputUnit);
+        AudioUnitUninitialize(player.outputUnit);
+        AudioComponentInstanceDispose(player.outputUnit);
         
     }
     return 0;
